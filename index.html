@@ -160,17 +160,17 @@
 
     <!-- SECRET GAME OVERLAY CANVAS -->
     <canvas id="ui-tag-canvas"></canvas>
-    <aside id="adventure-hud" class="hidden fixed top-3 left-3 z-[9998] w-[min(19rem,calc(100vw-1.5rem))] rounded-2xl border border-sky-200 bg-slate-950/85 p-3 text-white shadow-xl backdrop-blur-md" aria-live="polite">
+    <aside id="adventure-hud" class="hidden fixed top-3 left-3 z-[9998] w-[min(19rem,calc(100vw-1.5rem))] rounded-2xl border border-[#c7cdd1] bg-white/95 p-3 text-canvas-text shadow-xl backdrop-blur-md" aria-live="polite">
         <div class="flex items-center justify-between gap-2">
-            <p class="text-xs font-black uppercase tracking-[0.18em] text-sky-300">Campus Quest</p>
-            <span id="adventure-progress" class="rounded-full bg-sky-400/20 px-2 py-0.5 text-[10px] font-bold text-sky-200">0 / 5</span>
+            <p class="text-xs font-black uppercase tracking-[0.18em] text-canvas-ucasGreen">Campus Quest</p>
+            <span id="adventure-progress" class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-canvas-ucasGreen">0 / 5</span>
         </div>
         <p id="adventure-objective" class="mt-1 text-sm font-bold">Collect 5 class badges</p>
-        <p id="adventure-hint" class="mt-1 text-[11px] text-slate-300">Explore the sites and visit the Help Desk.</p>
-        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-white/15">
-            <div id="adventure-progress-bar" class="h-full w-0 rounded-full bg-sky-300 transition-all"></div>
+        <p id="adventure-hint" class="mt-1 text-[11px] text-canvas-muted">Explore the sites and visit the Help Desk.</p>
+        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+            <div id="adventure-progress-bar" class="h-full w-0 rounded-full bg-canvas-ucasGreen transition-all"></div>
         </div>
-        <p class="mt-2 text-[10px] text-slate-400">A / D explore · Space jump · E interact</p>
+        <p class="mt-2 text-[10px] text-canvas-muted">A / D explore · Space jump · E check in · ride shuttles</p>
     </aside>
 
     <!-- CANVAS-BLENDED BOTTOM HUD PILL (Hidden until Secret Button is clicked) -->
@@ -407,7 +407,7 @@
             <button type="button" data-touch-action="rangedSpecial" class="touch-control h-10 w-11 rounded-xl border border-violet-400 bg-slate-900/85 text-[8px] font-bold text-white">SPECIAL</button>
             <button type="button" data-touch-action="upSpecial" class="touch-control h-10 w-11 rounded-xl border border-fuchsia-400 bg-slate-900/85 text-[8px] font-bold text-white">RECOVER</button>
         </div>
-        <button id="world-interact-btn" type="button" class="hidden touch-control pointer-events-auto h-11 rounded-xl border border-emerald-300 bg-emerald-700/90 px-3 text-[10px] font-black text-white">TALK</button>
+        <button id="world-interact-btn" type="button" class="hidden touch-control pointer-events-auto h-11 rounded-xl border border-emerald-300 bg-emerald-700/90 px-3 text-[10px] font-black text-white">CHECK IN</button>
     </div>
 
     <!-- =====================================================================
@@ -1566,6 +1566,7 @@
         let worldFragments = [];
         let worldPlatforms = [];
         let worldFragmentCount = 0;
+        let campusBoostTimer = 0;
         const visitedWorldRegions = new Set();
         let adventureComplete = false;
         let botCount = 2;
@@ -4268,10 +4269,11 @@
                 }
                 worldLandmarks.push({
                     name: WORLD_REGION_NAMES[region],
-                    x: startX + regionWidth * (region === WORLD_REGION_NAMES.length - 1 ? 0.9 : 0.5),
+                    x: startX + regionWidth * 0.5,
                     y: floorY - 34,
                     color: colors.accent,
-                    visited: false
+                    siteIndex: region,
+                    visited: visitedWorldRegions.has(region)
                 });
 
                 const fragmentPositions = [0.12, 0.31, 0.69, 0.88];
@@ -4303,12 +4305,28 @@
                         y: startY - tier * rowGap - ((column + tier) % 3) * canvas.height * 0.008,
                         w: canvas.width * (0.16 + ((column + tier) % 3) * 0.025),
                         h: 14,
-                        type: 'world-ledge',
+                        type: tier > 2 && (column + tier) % 17 === 0
+                            ? 'world-bounce'
+                            : tier > 1 && (column * 2 + tier) % 13 === 0
+                                ? 'world-shuttle'
+                                : 'world-ledge',
                         color: colors.panel,
-                        accent: colors.accent
+                        accent: colors.accent,
+                        baseX: x,
+                        travel: canvas.width * 0.075,
+                        phase: (column * 1.7 + tier * 0.9) % (Math.PI * 2)
                     });
                 }
             }
+
+            const helpDeskRegion = WORLD_REGION_NAMES.length - 1;
+            worldLandmarks.push({
+                name: 'Help Desk',
+                x: helpDeskRegion * regionWidth + regionWidth * 0.9,
+                y: floorY - 34,
+                color: WORLD_REGION_COLORS[helpDeskRegion].secondary,
+                isHelpDesk: true
+            });
 
             worldPlatforms = list;
             worldCameraX = Math.max(0, Math.min(worldWidth - canvas.width, localRunner.x - canvas.width / 2));
@@ -4317,28 +4335,33 @@
 
         function updateAdventureHud() {
             if (!adventureHud || matchMode !== 'adventure') return;
-            const regionsVisited = visitedWorldRegions.size;
 
             if (worldFragmentCount < ADVENTURE_FRAGMENT_GOAL) {
                 adventureProgress.textContent = `${worldFragmentCount} / ${ADVENTURE_FRAGMENT_GOAL}`;
                 adventureProgressBar.style.width = `${worldFragmentCount / ADVENTURE_FRAGMENT_GOAL * 100}%`;
                 adventureObjective.textContent = `Collect ${ADVENTURE_FRAGMENT_GOAL} class badges`;
-                adventureHint.textContent = `${worldFragmentCount} found · look for badge cards`;
-            } else if (regionsVisited < WORLD_REGION_VISITS_GOAL) {
-                adventureProgress.textContent = `${regionsVisited} / ${WORLD_REGION_VISITS_GOAL}`;
-                adventureProgressBar.style.width = `${regionsVisited / WORLD_REGION_VISITS_GOAL * 100}%`;
-                adventureObjective.textContent = 'Visit every site';
-                adventureHint.textContent = `${regionsVisited} / ${WORLD_REGION_VISITS_GOAL} sites opened`;
+                adventureHint.textContent = `${worldFragmentCount} found · explore the platforms for more`;
+            } else if (visitedWorldRegions.size < WORLD_REGION_VISITS_GOAL) {
+                adventureProgress.textContent = `${visitedWorldRegions.size} / ${WORLD_REGION_VISITS_GOAL}`;
+                adventureProgressBar.style.width = `${visitedWorldRegions.size / WORLD_REGION_VISITS_GOAL * 100}%`;
+                adventureObjective.textContent = 'Check in at every site';
+                const nextSite = worldLandmarks.find(landmark => landmark.siteIndex !== undefined && !visitedWorldRegions.has(landmark.siteIndex));
+                adventureHint.textContent = nextSite
+                    ? `Next: ${nextSite.name} · get close and press E`
+                    : 'Find a campus site kiosk and press E';
             } else if (!adventureComplete) {
                 adventureProgress.textContent = 'READY';
                 adventureProgressBar.style.width = '100%';
                 adventureObjective.textContent = 'Find the Help Desk';
-                adventureHint.textContent = 'Reach the Help Desk in the Class Directory · press E';
+                adventureHint.textContent = 'Reach the Help Desk kiosk in the Class Directory · press E';
             } else {
                 adventureProgress.textContent = 'DONE';
                 adventureProgressBar.style.width = '100%';
                 adventureObjective.textContent = 'Quest complete — dashboard unlocked!';
-                adventureHint.textContent = 'All sites explored. Keep platforming!';
+                adventureHint.textContent = 'All sites checked in. Keep platforming!';
+            }
+            if (campusBoostTimer > 0) {
+                adventureHint.textContent += ` · Sprint ${Math.ceil(campusBoostTimer)}s`;
             }
         }
 
@@ -4346,8 +4369,6 @@
             if (matchMode !== 'adventure' || !worldWidth) return;
             const playerX = localRunner.x + localRunner.w / 2;
             const playerY = localRunner.y + localRunner.h / 2;
-            const regionIndex = Math.min(WORLD_REGION_NAMES.length - 1, Math.floor(playerX / (worldWidth / WORLD_REGION_NAMES.length)));
-            visitedWorldRegions.add(regionIndex);
 
             for (const fragment of worldFragments) {
                 if (!fragment.collected && Math.hypot(playerX - fragment.x, playerY - fragment.y) < 34) {
@@ -4363,17 +4384,34 @@
 
         function interactWithWorld() {
             if (!gameActive || matchMode !== 'adventure' || !worldLandmarks.length) return;
-            const wayfinder = worldLandmarks[worldLandmarks.length - 1];
-            const distance = Math.hypot(
-                localRunner.x + localRunner.w / 2 - wayfinder.x,
-                localRunner.y + localRunner.h / 2 - wayfinder.y
-            );
-            if (distance > 68) {
-                showCanvasToast('Keep exploring the Class Directory to find the Help Desk.');
+            const playerX = localRunner.x + localRunner.w / 2;
+            const playerY = localRunner.y + localRunner.h / 2;
+            const landmark = worldLandmarks
+                .map(item => ({ item, distance: Math.hypot(playerX - item.x, playerY - item.y) }))
+                .filter(entry => entry.distance < 104)
+                .sort((a, b) => a.distance - b.distance)[0]?.item;
+
+            if (!landmark) {
+                showCanvasToast('Get close to a campus kiosk to check in.');
                 return;
             }
+
+            if (!landmark.isHelpDesk) {
+                if (visitedWorldRegions.has(landmark.siteIndex)) {
+                    showCanvasToast(`${landmark.name} is already checked in.`);
+                    return;
+                }
+                visitedWorldRegions.add(landmark.siteIndex);
+                landmark.visited = true;
+                campusBoostTimer = Math.max(campusBoostTimer, 6);
+                spawnParticles(landmark.x, landmark.y - 28, landmark.color, 22);
+                showCanvasToast(`${landmark.name} checked in! Campus sprint charged.`);
+                updateAdventureHud();
+                return;
+            }
+
             if (worldFragmentCount < ADVENTURE_FRAGMENT_GOAL || visitedWorldRegions.size < WORLD_REGION_VISITS_GOAL) {
-                showCanvasToast('The Help Desk needs five class badges and all five sites visited.');
+                showCanvasToast(`The Help Desk needs ${ADVENTURE_FRAGMENT_GOAL} badges and all five site check-ins.`);
                 return;
             }
             if (!adventureComplete) {
@@ -4382,6 +4420,25 @@
                 updateAdventureHud();
             } else {
                 showCanvasToast('The Help Desk is open. Keep exploring!');
+            }
+        }
+
+        function updateOpenWorld() {
+            if (arenaMap !== 'world') return;
+            for (const platform of worldPlatforms) {
+                if (platform.type !== 'world-shuttle') continue;
+                const previousX = platform.x;
+                platform.x = Math.max(
+                    0,
+                    Math.min(worldWidth - platform.w, platform.baseX + Math.sin(performance.now() * 0.0008 + platform.phase) * platform.travel)
+                );
+                const playerBottom = localRunner.y + localRunner.h;
+                if (localRunner.grounded &&
+                    Math.abs(playerBottom - platform.y) < 8 &&
+                    localRunner.x + localRunner.w > previousX &&
+                    localRunner.x < previousX + platform.w) {
+                    localRunner.x += platform.x - previousX;
+                }
             }
         }
 
@@ -4425,6 +4482,21 @@
 
                 for (let page = firstPage; page <= lastPage; page++) {
                     const pageY = page * canvas.height;
+                    ctx.save();
+                    ctx.globalAlpha = 0.12;
+                    const campusGlow = ctx.createRadialGradient(
+                        x + regionWidth * (0.25 + (page % 2) * 0.5),
+                        pageY + canvas.height * 0.68,
+                        0,
+                        x + regionWidth * (0.25 + (page % 2) * 0.5),
+                        pageY + canvas.height * 0.68,
+                        regionWidth * 0.62
+                    );
+                    campusGlow.addColorStop(0, colors.accent);
+                    campusGlow.addColorStop(1, 'transparent');
+                    ctx.fillStyle = campusGlow;
+                    ctx.fillRect(x, pageY, regionWidth, canvas.height);
+                    ctx.restore();
                     const navHeight = Math.max(46, canvas.height * 0.07);
                     const sidebarWidth = canvas.width * 0.13;
                     const titleY = pageY + canvas.height * 0.14;
@@ -4563,39 +4635,60 @@
                 ctx.shadowColor = 'rgba(20, 32, 48, 0.2)';
                 ctx.shadowBlur = 8;
                 ctx.shadowOffsetY = 3;
-                ctx.fillStyle = platform.color || '#ffffff';
+                ctx.fillStyle = platform.type === 'world-bounce'
+                    ? '#fff2cc'
+                    : platform.type === 'world-shuttle'
+                        ? '#e7f7ef'
+                        : platform.color || '#ffffff';
                 ctx.beginPath();
-                ctx.roundRect(platform.x, platform.y, platform.w, platform.h, platform.type === 'world-ground' ? 4 : 7);
+                ctx.roundRect(platform.x, platform.y, platform.w, platform.h, platform.type === 'world-ground' ? 4 : 9);
                 ctx.fill();
                 ctx.shadowColor = 'transparent';
-                ctx.fillStyle = platform.accent || '#6558c8';
-                ctx.fillRect(platform.x + 5, platform.y, Math.max(0, platform.w - 10), 4);
+                ctx.fillStyle = platform.type === 'world-bounce' ? '#f0a838' : platform.type === 'world-shuttle' ? '#1c5c43' : platform.accent || '#6558c8';
+                ctx.fillRect(platform.x + 5, platform.y, Math.max(0, platform.w - 10), platform.type === 'world-ledge' ? 4 : 5);
+                if (platform.type === 'world-bounce') {
+                    ctx.fillStyle = '#9a5c00';
+                    ctx.font = '900 10px Lato, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('↑ BOOST ↑', platform.x + platform.w / 2, platform.y + 12);
+                } else if (platform.type === 'world-shuttle') {
+                    ctx.fillStyle = '#ffffff';
+                    for (let windowX = platform.x + 14; windowX < platform.x + platform.w - 8; windowX += 19) {
+                        ctx.beginPath();
+                        ctx.roundRect(windowX, platform.y + 7, 10, 4, 2);
+                        ctx.fill();
+                    }
+                }
                 ctx.restore();
             }
 
             for (const landmark of worldLandmarks) {
                 if (landmark.x < visibleLeft || landmark.x > visibleRight) continue;
-                const isHelpDesk = landmark === worldLandmarks[worldLandmarks.length - 1];
+                const isHelpDesk = !!landmark.isHelpDesk;
                 ctx.fillStyle = '#ffffff';
                 ctx.beginPath();
-                ctx.roundRect(landmark.x - 42, landmark.y - 64, 84, 51, 8);
+                ctx.roundRect(landmark.x - 54, landmark.y - 66, 108, 54, 9);
                 ctx.fill();
                 ctx.strokeStyle = landmark.color;
-                ctx.lineWidth = 3;
+                ctx.lineWidth = landmark.visited ? 4 : 2;
                 ctx.stroke();
                 ctx.fillStyle = landmark.color;
-                ctx.fillRect(landmark.x - 32, landmark.y - 53, 64, 6);
+                ctx.fillRect(landmark.x - 42, landmark.y - 55, 84, 7);
+                ctx.fillStyle = '#2d3b45';
+                ctx.font = '900 8px Lato, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(landmark.isHelpDesk ? 'Student Support' : landmark.name, landmark.x, landmark.y - 43);
                 ctx.fillStyle = '#d9e2ec';
-                ctx.fillRect(landmark.x - 30, landmark.y - 39, 43, 4);
-                ctx.fillRect(landmark.x - 30, landmark.y - 30, 54, 4);
+                ctx.fillRect(landmark.x - 39, landmark.y - 39, 57, 4);
+                ctx.fillRect(landmark.x - 39, landmark.y - 30, 72, 4);
                 ctx.fillStyle = landmark.color;
                 ctx.beginPath();
-                ctx.roundRect(landmark.x - 29, landmark.y - 13, 58, 17, 5);
+                ctx.roundRect(landmark.x - 40, landmark.y - 13, 80, 17, 5);
                 ctx.fill();
                 ctx.fillStyle = '#ffffff';
-                ctx.font = '900 9px Lato, sans-serif';
+                ctx.font = '900 8px Lato, sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText(isHelpDesk ? 'HELP DESK · E' : 'OPEN SITE', landmark.x, landmark.y - 1);
+                ctx.fillText(isHelpDesk ? 'HELP DESK · E' : landmark.visited ? 'CHECKED IN ✓' : 'CHECK IN · E', landmark.x, landmark.y - 1);
             }
 
             for (const fragment of worldFragments) {
@@ -5654,7 +5747,10 @@
 
         function stepRunner(r, dt, isBot = false) {
             const fc = FIGHTER_CLASSES[r.fighterClass] || FIGHTER_CLASSES.vanguard;
-            const speedMult = fc.speedMult || 1.0;
+            if (!isBot && matchMode === 'adventure') {
+                campusBoostTimer = Math.max(0, campusBoostTimer - dt);
+            }
+            const speedMult = (fc.speedMult || 1.0) * (!isBot && matchMode === 'adventure' && campusBoostTimer > 0 ? 1.35 : 1);
             const gravMult = fc.gravMult || 1.0;
             const maxJumps = fc.maxJumps || 2;
 
@@ -5909,12 +6005,14 @@
             if (r.vy >= 0 && r.dropThroughTimer <= 0) {
                 const currBottom = r.y + r.h;
                 let bestTop = Infinity;
+                let landedPlatform = null;
 
                 for (const plat of platforms) {
                     const horizOverlap = (r.x + r.w - 2 > plat.x) && (r.x + 2 < plat.x + plat.w);
                     if (horizOverlap && prevBottom <= plat.y + 8 && currBottom >= plat.y) {
                         if (plat.y < bestTop) {
                             bestTop = plat.y;
+                            landedPlatform = plat;
                         }
                     }
                 }
@@ -5925,6 +6023,19 @@
                     r.grounded = true;
                     r.jumpsLeft = maxJumps;
                     r.fastFalling = false;
+                    if (landedPlatform?.type === 'world-bounce') {
+                        r.vy = -760;
+                        r.grounded = false;
+                        spawnParticles(r.x + r.w / 2, bestTop, '#f0a838', 18);
+                        floatingCallouts.push({
+                            x: r.x + r.w / 2,
+                            y: bestTop - 8,
+                            text: 'BOING!',
+                            color: '#b45309',
+                            life: 0.65,
+                            maxLife: 0.65
+                        });
+                    }
                     if (!wasGrounded) {
                         if (impactVy >= 560) {
                             r.scaleX = 1.48;
@@ -6364,6 +6475,7 @@
             pollXboxController();
 
             if (hitstopTimer <= 0) {
+                if (arenaMap === 'world') updateOpenWorld();
                 stepRunner(localRunner, dt, false);
 
                 const activeBots = getActiveBots();
